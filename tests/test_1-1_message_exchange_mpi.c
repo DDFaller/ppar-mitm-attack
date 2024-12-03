@@ -6,13 +6,11 @@
 // Definições
 #define INSERT_TAG 100
 
-// Função auxiliar para verificar o envio e recebimento
 void test_message_exchange(int rank, int num_procs, MPI_Datatype entryType) {
     struct entry test_entry;
     MPI_Status status;
     int flag;
 
-    // O nó 0 envia mensagens para todos os outros
     if (rank == 0) {
         for (int target = 1; target < num_procs; target++) {
             test_entry.k = target * 10;
@@ -37,7 +35,6 @@ void test_message_exchange(int rank, int num_procs, MPI_Datatype entryType) {
     }
 }
 
-// Programa principal
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
@@ -48,7 +45,6 @@ int main(int argc, char** argv) {
     // Criar o tipo MPI para struct entry
     MPI_Datatype entryType = createEntryType();
 
-    // Testar troca de mensagens
     test_message_exchange(rank, num_procs, entryType);
 
     // Finalizar

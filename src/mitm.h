@@ -50,22 +50,35 @@ void Speck64128Encrypt(const u32 Pt[], u32 Ct[], const u32 rk[]);
 void Speck64128Decrypt(u32 Pt[], const u32 Ct[], u32 const rk[]);
 
 /******************************** dictionary MPI ********************************/
+/* Initialization function to build local hash tables*/
 void dict_setup_mpi(u64 global_size, int rank, int num_procs);
+
 #define dict_insert_mpi(key,value) dict_insert_entry(key,value,-1)
+/* Tries to insert a entry into the local hash table, if the key isn't destined
+    to that machine node instead add the entry to the unavailable buffer
+*/
 void dict_insert_entry(u64 key, u64 value,int target_rank);
+
+/* TODO: */
 int dict_probe_mpi(u64 key, int maxval, u64 values[], int rank, int num_procs);
-void dict_gather_results(int rank, int num_procs);
+
+/* Destroy local hash table */
 void dict_cleanup_mpi();
-void dict_view();
 
-
-void send_buffered_entries(int rank, int num_procs);
-void send_buffered_entries_with_attach(int rank, int num_procs);
-void receive_buffered_entries_nonblocking(int rank);
+/* Verify thorugh all the buffers with the work has been completed */
 bool is_work_done(int rank, int num_procs);
+
+/* Share unavailabe buffer to all nodes, using allgather.*/
 void exchange_buffers_variable(int rank, int num_procs);
 
+
+/******************************** MPI test functions ********************************/
+/* Recreate the global dictionary gathering each local hash table */
+void dict_gather_results(int rank, int num_procs);
+
+/* Generate a global unavailable buffer gathering results from each node */
 void mpi_gather_buffers(int rank, int num_procs);
+
 /***************************** MITM problem ***********************************/
 
 u64 f(u64 k);

@@ -26,7 +26,6 @@ int rank;                               // MPI rank of the current process
 
 typedef struct {
     struct entry *entries;              // Array of entries (key-value pairs)
-    int* target_nodes;
     bool* sent_flags;
     u64 size;                           // Current size of the buffer
     u64 capacity;                       // Maximum capacity of the buffer
@@ -70,9 +69,8 @@ void init_unavailable_buffer(u64 capacity) {
     buffer.size = 0;
     buffer.capacity = capacity;
     buffer.entries = (struct entry*)malloc(capacity * sizeof(struct entry));
-    buffer.target_nodes = (int*)malloc(capacity * sizeof(int));
     buffer.sent_flags = (bool*)malloc(capacity * sizeof(bool));
-    if (buffer.entries == NULL || buffer.target_nodes == NULL || buffer.sent_flags == NULL) {
+    if (buffer.entries == NULL || buffer.sent_flags == NULL) {
         perror("Error allocating memory for unavailable buffer");
         exit(EXIT_FAILURE);
     }
@@ -107,7 +105,6 @@ void remove_from_unavailable_buffer(u64 key) {
             // Shift all subsequent elements to the left
             for (u64 j = i; j < buffer.size - 1; j++) {
                 buffer.entries[j] = buffer.entries[j + 1];
-                buffer.target_nodes[j] = buffer.target_nodes[j + 1];
             }
 
             // Decrease the buffer size
@@ -193,18 +190,15 @@ void mpi_gather_buffers(int rank, int num_procs) {
     free(displacements);
 }
 
-
-
-
+/* Clear memory allocated for the unavailable buffer */
 void destroy_unavailable_buffer() {
     free(buffer.entries);
-    free(buffer.target_nodes);
     free(buffer.sent_flags);
     buffer.size = 0;
     buffer.capacity = 0;
 }
 
-/* Clear and free memory allocated for the unavailable buffer and then reinit the buffer like a reset */
+/* Clear memory allocated for the unavailable buffer and then reinit the buffer like a reset */
 void clear_unavailable_buffer() {
     destroy_unavailable_buffer();
     init_unavailable_buffer(local_dict_size);
@@ -251,8 +245,8 @@ bool is_key_present(u64 key) {
     return false;
 }
 
-
 u64 determine_target_node(u64 key, int target_rank, u64* local_index);
+
 void dict_insert_entry(u64 key, u64 value, int target_rank) {
     // Determine target node and local index
     u64 local_index;
@@ -322,94 +316,12 @@ void buffer_entry(u64 key, u64 value, u64 target_node) {
     add_to_unavailable_buffer(key, value, target_node);
 }
 
-
-/* View the local dictionary and unavailable buffer */
-void dict_view() {
-    print_unavailable_buffer(&buffer);
-    for (int i = 0; i < local_dict_size; i++) {
-        if (local_A[i].k == EMPTY) {
-            printf("Rank %d: A[%d] is EMPTY.\n", rank, i);
-        } else {
-            printf("Rank %d: A[%d] = (%u, %lu)\n", rank, i, local_A[i].k, local_A[i].v);
-        }
-    }
-}
-
 /* Clean up and free memory used by the dictionary */
 void dict_cleanup_mpi() {
     printf("Cleaning up dictionary on process %d.\n", rank);
     free(local_A);
 }
-
-void send_buffered_entries(int rank, int num_procs) {
-
-    if( buffer.size == 0){
-        MPI_Waitall(buffer.size, NULL, MPI_STATUSES_IGNORE);
-        return;
-    }
-    MPI_Request* requests = (MPI_Request*)malloc(buffer.size * sizeof(MPI_Request));
-    MPI_Datatype entryType = createEntryType();
-
-    printf("Node %d sending buffered entries...\n", rank);
-
-    for (u64 i = 0; i < buffer.size; i++) {
-        int target_node = buffer.target_nodes[i];
-
-        printf("Node %d sending entry: Key: %u, Value: %lu to Node %d\n",
-               rank, buffer.entries[i].k, buffer.entries[i].v, target_node);
-
-        assert(target_node >= 0 && target_node < num_procs);
-        // Non-blocking send
-        MPI_Isend(&buffer.entries[i], 1, entryType, target_node, INSERT_TAG, MPI_COMM_WORLD, &requests[i]);
-    }
-
-    // Wait for all sends to complete
-    MPI_Waitall(buffer.size, requests, MPI_STATUSES_IGNORE);
-
-    // Clear the buffer after sending
-    clear_unavailable_buffer();
-
-    free(requests);
-    printf("Node %d finished sending entries.\n", rank);
-}
-
-void receive_buffered_entries_nonblocking(int rank) {
-    MPI_Status status;
-    struct entry received_entry;
-    MPI_Datatype entryType = createEntryType();
-
-    printf("Node %d waiting to receive entries...\n", rank);
-
-    while (true) {
-        int flag = 0;
-
-        // Check if there's a message to receive
-        MPI_Iprobe(MPI_ANY_SOURCE, INSERT_TAG, MPI_COMM_WORLD, &flag, &status);
-
-
-        printf("MPI process %d from rank %d, with tag %d and error code %d.\n", 
-               rank,
-               status.MPI_SOURCE,
-               status.MPI_TAG,
-               status.MPI_ERROR);
-
-        if (!flag) { break; }//If no message received leave the loop
-        else {
-            MPI_Request request;
-            // Receive the entry
-            MPI_Recv(&received_entry, 1, entryType, MPI_ANY_SOURCE, INSERT_TAG, MPI_COMM_WORLD, &status);
-
-            printf("Node %d received entry: Key: %u, Value: %lu from Node %d\n",
-                   rank, received_entry.k, received_entry.v, status.MPI_SOURCE);
-
-            // Insert the received entry into the local hash table
-            dict_insert_entry(received_entry.k, received_entry.v, received_entry.target_rank);
-        }
-    }
-
-    printf("Node %d finished receiving entries.\n", rank);
-}
-
+ex
 void exchange_buffers_variable(int rank, int num_procs) {
     // Obter tamanhos de buffer de todos os processos
     int* buffer_sizes = (int*)malloc(num_procs * sizeof(int));
@@ -448,6 +360,7 @@ void exchange_buffers_variable(int rank, int num_procs) {
     free(displacements);
 }
 
+/* Verify thorugh all the buffers with the work has been completed */
 bool is_work_done(int rank, int num_procs) {
     // Verificar se o buffer de indisponibilidade local está vazio
     int local_work_done = (buffer.size == 0) ? 1 : 0;
@@ -460,7 +373,7 @@ bool is_work_done(int rank, int num_procs) {
     return global_work_done == num_procs;
 }
 
-
+/* Construct the global dict using the local ones, recommend just for testing */
 void dict_gather_results(int rank, int num_procs) {
     // MPI datatype for entries
     MPI_Datatype entryType = createEntryType();
@@ -498,7 +411,6 @@ void dict_gather_results(int rank, int num_procs) {
         free(global_table);
     }
 }
-
 
 /************************* Golden Claw Search *************************/
 
