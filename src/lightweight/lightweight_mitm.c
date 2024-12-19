@@ -10,8 +10,6 @@
  * TODO:
  *   - Add measurements in other parts of the code: how much time does the
  *     code stays at exchange_buffers? And in the fill/probe sections?
- *   - Change the second Alltoall on exchange_buffers() to Alltoallv to avoid
- *     sending garbage to other processes.
  *   - Change COMPRESS_FACTOR from a macro to a variable that is calculated
  *     based on n and the amount of available memory. For instance, if we have
  *     768GB of memory (8 nodes), we don't have to compress anything until
@@ -20,6 +18,9 @@
  *     on dict_size and the maximum value for an MPI message. Currently, the
  *     buffer size depends only on dict_size; therefore, a big dictionary
  *     results in a big buffer, which results in prohibitive MPI messages.
+ *   - For a fixed n, test effect of increasing cores (no compression).
+ *   - For a fixed number of cores, test effect of increasing n (no compression).
+ *   - For a fixed number of cores and n, test effect of compression.
  *
  */
 
@@ -57,8 +58,8 @@ u32 C[2][2];
 #define ROOT_RANK               0
 #define BUFFER_COUNT_SIZE       1
 #define BUFFER_ELEMENT_SIZE     2
-#define BUFFER_RELATIVE_SIZE    0.0005  // this has to be small so that we send small messages
-#define COMPRESS_FACTOR         5
+#define BUFFER_RELATIVE_SIZE    0.005  // this has to be small so that we send small messages
+#define COMPRESS_FACTOR         3
 
 /* global variables for the parallelization */
 int num_processes, rank;
@@ -66,6 +67,10 @@ int num_processes, rank;
 u64 buffer_size;
 u64 *buffers;
 u64 *buffers_counts;
+
+/* variables to measure the buffer efficiency */
+int num_exchanges = 0;
+double cum_buffer_occupancy = 0;
 
 /************************ tools and utility functions *************************/
 
@@ -277,16 +282,38 @@ int add_to_buffer(u64 key, u64 val) {
     return (buffers_counts[h_rank] == buffer_size)? 1 : 0;
 }
 
+/* Update the buffer occupancy counters. */
+void update_buffer_occupancy_statistics() {
+    u64 num_elements = 0;  // used only for statistics
+    for (int i = 0; i < num_processes; i++) {
+        num_elements += buffers_counts[i];
+    }
+    num_exchanges += 1;
+    cum_buffer_occupancy += (double) num_elements / (buffer_size * num_processes);
+}
+
+/* Print average buffer occupancy. */
+void print_average_buffer_occupancy() {
+    if (rank == ROOT_RANK) {
+        MPI_Reduce(MPI_IN_PLACE, &cum_buffer_occupancy, 1, MPI_DOUBLE,
+                   MPI_SUM, ROOT_RANK, MPI_COMM_WORLD);
+        printf("Average buffer occupancy: %.2f%%\n",
+               cum_buffer_occupancy / (num_exchanges * num_processes) * 100);
+    } else {
+        MPI_Reduce(&cum_buffer_occupancy, &cum_buffer_occupancy, 1,
+                   MPI_DOUBLE, MPI_SUM, ROOT_RANK, MPI_COMM_WORLD);
+    }
+}
+
 /* Exchange buffer sizes and buffers between processes. */
 void exchange_buffers() {
     MPI_Alltoall(MPI_IN_PLACE, BUFFER_COUNT_SIZE, MPI_UINT64_T, buffers_counts,
                  BUFFER_COUNT_SIZE, MPI_UINT64_T, MPI_COMM_WORLD);
-
-    // NOTE: This strategy is not optimal, since we send the entire buffer,
-    // regardless if there is a valid element or garbage; use Alltoallv
     MPI_Alltoall(MPI_IN_PLACE, buffer_size * BUFFER_ELEMENT_SIZE, MPI_UINT64_T,
                  buffers, buffer_size * BUFFER_ELEMENT_SIZE, MPI_UINT64_T,
                  MPI_COMM_WORLD);
+
+    update_buffer_occupancy_statistics();
 }
 
 /* Insert elements from a buffer into the dict and flush the buffer. */
@@ -536,6 +563,9 @@ int main(int argc, char **argv)
     	assert(is_good_pair(k1[i], k2[i]));
 	    printf("Solution found: (%" PRIx64 ", %" PRIx64 ") [checked OK]\n", k1[i], k2[i]);
 	}
+
+    /* print some post-processing statistics */
+    print_average_buffer_occupancy();
 
     MPI_Finalize();
 }
