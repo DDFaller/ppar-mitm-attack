@@ -8,7 +8,6 @@
  *             Daniel MACHADO CARNEIRO FALLER
  *
  * TODO:
- *   - Add assert that check if num_processes == 2**k.
  *   - Add measurements in other parts of the code: how much time does the
  *     code stays at exchange_buffers? And in the fill/probe sections?
  *   - Change the second Alltoall on exchange_buffers() to Alltoallv to avoid
@@ -21,8 +20,6 @@
  *     on dict_size and the maximum value for an MPI message. Currently, the
  *     buffer size depends only on dict_size; therefore, a big dictionary
  *     results in a big buffer, which results in prohibitive MPI messages.
- *   - Consider iterating through x and y using a cyclic distribution to ensure
- *     an "equal" distribution of elements through the dictionary.
  *
  */
 
@@ -53,6 +50,22 @@ struct entry *A;       /* the hash table */
 /* (P, C) : two plaintext-ciphertext pairs */
 u32 P[2][2] = {{0, 0}, {0xffffffff, 0xffffffff}};
 u32 C[2][2];
+
+/***************************** MPI settings *********************************/
+
+#define N_PROBES_MAX            256
+#define ROOT_RANK               0
+#define BUFFER_COUNT_SIZE       1
+#define BUFFER_ELEMENT_SIZE     2
+#define BUFFER_RELATIVE_SIZE    0.0005  // this has to be small so that we send small messages
+#define COMPRESS_FACTOR         5
+
+/* global variables for the parallelization */
+int num_processes, rank;
+
+u64 buffer_size;
+u64 *buffers;
+u64 *buffers_counts;
 
 /************************ tools and utility functions *************************/
 
@@ -159,7 +172,7 @@ void dict_setup(u64 size)
 /* Insert the binding key |----> value in the dictionary */
 void dict_insert(u64 key, u64 value)
 {
-    u64 h = murmur64(key) % dict_size;
+    u64 h = murmur64(key) % dict_size_global - rank * dict_size;
     for (;;) {
         if (A[h].k == EMPTY)
             break;
@@ -180,7 +193,7 @@ void dict_insert(u64 key, u64 value)
 int dict_probe(u64 key, int maxval, u64 values[])
 {
     u32 k = key % PRIME;
-    u64 h = murmur64(key) % dict_size;
+    u64 h = murmur64(key) % dict_size_global - rank * dict_size;
     int nval = 0;
     for (;;) {
         if (A[h].k == EMPTY)
@@ -238,21 +251,7 @@ bool is_good_pair(u64 k1, u64 k2)
     return (Ct[0] == C[1][0]) && (Ct[1] == C[1][1]);
 }
 
-/***************************** MPI settings ***********************************/
-
-#define N_PROBES_MAX            256
-#define ROOT_RANK               0
-#define BUFFER_COUNT_SIZE       1
-#define BUFFER_ELEMENT_SIZE     2
-#define BUFFER_RELATIVE_SIZE    0.005  // this has to be small so that we send small messages
-#define COMPRESS_FACTOR         2
-
-/* global variables for the parallelization */
-int num_processes, rank;
-
-u64 buffer_size;
-u64 *buffers;
-u64 *buffers_counts;
+/***************************** MPI functions ***********************************/
 
 /* Allocate memory space for the buffers and the buffer counts. */
 void setup_buffers() {
@@ -353,19 +352,17 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     /* step 0: initialize buffers */
     setup_buffers();
 
-    /* step 1: fill up the dictionaries */
+    /* step 1: fill up the dictionaries (using cyclic load balancing) */
     u64 N = 1ull << n;
-    u64 x_per_round = N >> COMPRESS_FACTOR;
+    u64 xs_per_round = N >> COMPRESS_FACTOR;
 
     for (int round = 0; round < (1 << COMPRESS_FACTOR); round++) {
-        u64 x0_round = x_per_round * round;
-        u64 x_count_local = x_per_round / num_processes;
-
-        u64 x_start = x0_round + x_count_local * rank;
-        u64 x_end = x_start + x_count_local;
+        u64 xs_per_process = xs_per_round / num_processes;
+        u64 x_start = xs_per_round * round + rank;
+        u64 x_end = x_start + xs_per_process * num_processes;
 
         start = wtime();
-        for (u64 x = x_start; x < x_end; x++) {
+        for (u64 x = x_start; x < x_end; x += num_processes) {
             u64 z = f(x);
             if (add_to_buffer(z, x)) {
                 exchange_buffers();
@@ -390,12 +387,12 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             printf("Fill round %d: %.1fs\n", round, mid - start);
         }
 
-        /* step 2: probe the dictionaries */
-        u64 N_local = N / num_processes;
-        u64 z_start = N_local * rank;
-        u64 z_end = z_start + N_local;
+        /* step 2: probe the dictionaries (also with cyclic load balancing) */
+        u64 zs_per_process = N / num_processes;
+        u64 z_start = rank;
+        u64 z_end = z_start + zs_per_process * num_processes;
 
-        for (u64 z = z_start; z < z_end; z++) {
+        for (u64 z = z_start; z < z_end; z += num_processes) {
             u64 y = g(z);
             if (add_to_buffer(y, z)) {
                 exchange_buffers();
@@ -492,6 +489,12 @@ int main(int argc, char **argv)
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &num_processes);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    assert(
+        num_processes != 0
+        && (num_processes & (num_processes - 1)) == 0
+        && "The number of processes must be a power of two."
+    );
 
 	process_command_line_options(argc, argv);
 
