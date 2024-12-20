@@ -53,6 +53,7 @@ u32 C[2][2];
 #define BUFFER_ELEMENT_SIZE     2
 #define BUFFER_RELATIVE_SIZE    0.005    // 0.5% of (local) dict size
 #define MIN(x, y)               (((x) < (y)) ? (x) : (y))
+#define GET_BUFFER_SIZE(b)      MIN(ceil(BUFFER_RELATIVE_SIZE * b), INT_MAX / BUFFER_ELEMENT_SIZE)
 
 /* global variables for the parallelization */
 int num_processes, rank;
@@ -258,8 +259,7 @@ bool is_good_pair(u64 k1, u64 k2)
 void setup_buffers() {
     // The buffer_size describes the buffer size for ONE process.
     // Therefore, a process has a total buffer size of buffer_size * num_processes
-    buffer_size = MIN(ceil(BUFFER_RELATIVE_SIZE * dict_size),
-                      INT_MAX / BUFFER_ELEMENT_SIZE);
+    buffer_size = GET_BUFFER_SIZE(dict_size);
     buffers = malloc(sizeof(*buffers) * buffer_size * BUFFER_ELEMENT_SIZE * num_processes);
     buffers_counts = malloc(sizeof(*buffers_counts) * num_processes);
 
@@ -367,8 +367,8 @@ u64 batch_probe(int *nres, int maxres, u64 k1[], u64 k2[]) {
 /* Set compression factor based on maximum memory available. */
 void set_compression_factor(int memory_max) {
     u64 dict_slots = 1.125 * (1ull << n);
-    u64 buffers_slots = MIN(ceil(BUFFER_RELATIVE_SIZE * dict_slots),
-                            INT_MAX / BUFFER_ELEMENT_SIZE) * num_processes;
+    u64 buffers_slots = GET_BUFFER_SIZE(dict_slots) *
+                        BUFFER_ELEMENT_SIZE * num_processes;
     u64 memory_required = (dict_slots + buffers_slots) * sizeof(*A);
     int minimum_slices = ceil(memory_required / (memory_max * 1e9));
 
@@ -559,11 +559,10 @@ int main(int argc, char **argv)
         human_format(dict_size * sizeof(*A), hdsize);
         printf("Global dictionary size: %sB (%sB per process)\n", hdsize_global, hdsize);
 
-        human_format(ceil(BUFFER_RELATIVE_SIZE * dict_size) *
-                          sizeof(*buffers) * BUFFER_ELEMENT_SIZE *
-                          num_processes * num_processes, hdsize_global);
-        human_format(ceil(BUFFER_RELATIVE_SIZE * dict_size) *
-                          sizeof(*buffers) * BUFFER_ELEMENT_SIZE * num_processes, hdsize);
+        human_format(GET_BUFFER_SIZE(dict_size) * BUFFER_ELEMENT_SIZE *
+                     num_processes * sizeof(*buffers) * num_processes, hdsize_global);
+        human_format(GET_BUFFER_SIZE(dict_size) * BUFFER_ELEMENT_SIZE *
+                     num_processes * sizeof(*buffers), hdsize);
         printf("Total buffer size: %sB (%sB per process)\n", hdsize_global, hdsize);
     }
 
