@@ -10,10 +10,6 @@
  * TODO:
  *   - Add measurements in other parts of the code: how much time does the
  *     code stays at exchange_buffers? And in the fill/probe sections?
- *   - Change COMPRESS_FACTOR from a macro to a variable that is calculated
- *     based on n and the amount of available memory. For instance, if we have
- *     768GB of memory (8 nodes), we don't have to compress anything until
- *     n=36 (dict of 864GB). Then, we can do COMPRESS_FACTOR = max(0, n - 35).
  *   - Change the BUFFER_RELATIVE_SIZE from a macro to a variable that depends
  *     on dict_size and the maximum value for an MPI message. Currently, the
  *     buffer size depends only on dict_size; therefore, a big dictionary
@@ -59,7 +55,6 @@ u32 C[2][2];
 #define BUFFER_COUNT_SIZE       1
 #define BUFFER_ELEMENT_SIZE     2
 #define BUFFER_RELATIVE_SIZE    0.005  // this has to be small so that we send small messages
-#define COMPRESS_FACTOR         3
 
 /* global variables for the parallelization */
 int num_processes, rank;
@@ -71,6 +66,9 @@ u64 *buffers_counts;
 /* variables to measure the buffer efficiency */
 int num_exchanges = 0;
 double cum_buffer_occupancy = 0;
+
+/* compress factor to deal with large n and small memory */
+int compress_factor = 0;
 
 /************************ tools and utility functions *************************/
 
@@ -367,6 +365,17 @@ u64 batch_probe(int *nres, int maxres, u64 k1[], u64 k2[]) {
     return ncandidates_partial;
 }
 
+/* Set compression factor based on maximum memory available. */
+void set_compression_factor(int memory_max) {
+    // NOTE: This doesn't consider the memory required for the buffer!
+    u64 memory_required = 1.125 * (1ull << n) * sizeof(*A);
+    int minimum_slices = ceil(memory_required / (memory_max * 1e9));
+
+    while ((1 << compress_factor) < minimum_slices) {
+        compress_factor++;
+    }
+}
+
 /******************************************************************************/
 
 /* search the "golden collision" */
@@ -381,9 +390,9 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 
     /* step 1: fill up the dictionaries (using cyclic load balancing) */
     u64 N = 1ull << n;
-    u64 xs_per_round = N >> COMPRESS_FACTOR;
+    u64 xs_per_round = N >> compress_factor;
 
-    for (int round = 0; round < (1 << COMPRESS_FACTOR); round++) {
+    for (int round = 0; round < (1 << compress_factor); round++) {
         u64 xs_per_process = xs_per_round / num_processes;
         u64 x_start = xs_per_round * round + rank;
         u64 x_end = x_start + xs_per_process * num_processes;
@@ -465,6 +474,7 @@ void usage(char **argv)
         printf("--n N                       block size [default 24]\n");
         printf("--C0 N                      1st ciphertext (in hex)\n");
         printf("--C1 N                      2nd ciphertext (in hex)\n");
+        printf("--mem N                     memory available (in GB)\n");
         printf("\n");
         printf("All arguments are required\n");
         exit(0);
@@ -472,14 +482,16 @@ void usage(char **argv)
 
 void process_command_line_options(int argc, char ** argv)
 {
-        struct option longopts[4] = {
+        struct option longopts[5] = {
                 {"n", required_argument, NULL, 'n'},
                 {"C0", required_argument, NULL, '0'},
                 {"C1", required_argument, NULL, '1'},
+                {"mem", required_argument, NULL, 'm'},
                 {NULL, 0, NULL, 0}
         };
         char ch;
         int set = 0;
+        int memory_max;
         while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1) {
                 switch (ch) {
                 case 'n':
@@ -497,6 +509,10 @@ void process_command_line_options(int argc, char ** argv)
                         u64 c1 = strtoull(optarg, NULL, 16);
                         C[1][0] = c1 & 0xffffffff;
                         C[1][1] = c1 >> 32;
+                        break;
+                case 'm':
+                        memory_max = atoi(optarg);
+                        set_compression_factor(memory_max);
                         break;
                 default:
                         errx(1, "Unknown option\n");
@@ -526,7 +542,7 @@ int main(int argc, char **argv)
 	process_command_line_options(argc, argv);
 
     /* setup the distributed dictionary strategy */
-    dict_size = ceil(1.125 * (1ull << (n - COMPRESS_FACTOR)) / num_processes);
+    dict_size = ceil(1.125 * (1ull << (n - compress_factor)) / num_processes);
     dict_size_global = dict_size * num_processes;
 	dict_setup(dict_size);
 
@@ -535,7 +551,7 @@ int main(int argc, char **argv)
         printf("Running with n=%d, C0=(%08x, %08x) and C1=(%08x, %08x)\n",
                (int) n, C[0][0], C[0][1], C[1][0], C[1][1]);
         printf("Number of processes: %d\n", num_processes);
-        printf("Compression level: %d (%d rounds)\n", COMPRESS_FACTOR, 1 << COMPRESS_FACTOR);
+        printf("Compression level: %d (%d rounds)\n", compress_factor, 1 << compress_factor);
 
         char hdsize_global[8], hdsize[8];
         human_format(dict_size_global * sizeof(*A), hdsize_global);
