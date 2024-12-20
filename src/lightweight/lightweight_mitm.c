@@ -10,10 +10,6 @@
  * TODO:
  *   - Add measurements in other parts of the code: how much time does the
  *     code stays at exchange_buffers? And in the fill/probe sections?
- *   - Change the BUFFER_RELATIVE_SIZE from a macro to a variable that depends
- *     on dict_size and the maximum value for an MPI message. Currently, the
- *     buffer size depends only on dict_size; therefore, a big dictionary
- *     results in a big buffer, which results in prohibitive MPI messages.
  *   - For a fixed n, test effect of increasing cores (no compression).
  *   - For a fixed number of cores, test effect of increasing n (no compression).
  *   - For a fixed number of cores and n, test effect of compression.
@@ -21,6 +17,7 @@
  */
 
 #include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,7 +51,8 @@ u32 C[2][2];
 #define ROOT_RANK               0
 #define BUFFER_COUNT_SIZE       1
 #define BUFFER_ELEMENT_SIZE     2
-#define BUFFER_RELATIVE_SIZE    0.005  // this has to be small so that we send small messages
+#define BUFFER_RELATIVE_SIZE    0.005    // 0.5% of (local) dict size
+#define MIN(x, y)               (((x) < (y)) ? (x) : (y))
 
 /* global variables for the parallelization */
 int num_processes, rank;
@@ -260,7 +258,8 @@ bool is_good_pair(u64 k1, u64 k2)
 void setup_buffers() {
     // The buffer_size describes the buffer size for ONE process.
     // Therefore, a process has a total buffer size of buffer_size * num_processes
-    buffer_size = ceil(BUFFER_RELATIVE_SIZE * dict_size);
+    buffer_size = MIN(ceil(BUFFER_RELATIVE_SIZE * dict_size),
+                      INT_MAX / BUFFER_ELEMENT_SIZE);
     buffers = malloc(sizeof(*buffers) * buffer_size * BUFFER_ELEMENT_SIZE * num_processes);
     buffers_counts = malloc(sizeof(*buffers_counts) * num_processes);
 
@@ -367,8 +366,10 @@ u64 batch_probe(int *nres, int maxres, u64 k1[], u64 k2[]) {
 
 /* Set compression factor based on maximum memory available. */
 void set_compression_factor(int memory_max) {
-    // NOTE: This doesn't consider the memory required for the buffer!
-    u64 memory_required = 1.125 * (1ull << n) * sizeof(*A);
+    u64 dict_slots = 1.125 * (1ull << n);
+    u64 buffers_slots = MIN(ceil(BUFFER_RELATIVE_SIZE * dict_slots),
+                            INT_MAX / BUFFER_ELEMENT_SIZE) * num_processes;
+    u64 memory_required = (dict_slots + buffers_slots) * sizeof(*A);
     int minimum_slices = ceil(memory_required / (memory_max * 1e9));
 
     while ((1 << compress_factor) < minimum_slices) {
