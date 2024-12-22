@@ -2,17 +2,14 @@
  * Sorbonne Université - PPAR (S1-24)
  * Project - Direct Meet-in-the-Middle Attack
  *
- * "Lightweight" version of the MitM distributed algorithm.
+ * Implementation of the MitM distributed algorithm with a "lightweight"
+ * option, i.e. to use less memory than required by the sequential version.
+ *
+ * The program has an early exit strategy, and halts as soon as a golden
+ * collision is found.
  *
  * Adapted by: Matheus FERNANDES MORENO
  *             Daniel MACHADO CARNEIRO FALLER
- *
- * TODO:
- *   - Add measurements in other parts of the code: how much time does the
- *     code stays at exchange_buffers? And in the fill/probe sections?
- *   - For a fixed n, test effect of increasing cores (no compression).
- *   - For a fixed number of cores, test effect of increasing n (no compression).
- *   - For a fixed number of cores and n, test effect of compression.
  *
  */
 
@@ -51,23 +48,26 @@ u32 C[2][2];
 #define ROOT_RANK               0
 #define BUFFER_COUNT_SIZE       1
 #define BUFFER_ELEMENT_SIZE     2
-#define BUFFER_RELATIVE_SIZE    0.005    // 0.5% of (local) dict size
+#define EARLY_EXIT_SIZE         1
+#define BUFFER_RELATIVE_SIZE    0.005    /* 0.5% of (local) dict size */
 #define MIN(x, y)               (((x) < (y)) ? (x) : (y))
-#define GET_BUFFER_SIZE(b)      MIN(ceil(BUFFER_RELATIVE_SIZE * b), INT_MAX / BUFFER_ELEMENT_SIZE)
+#define GET_BUFFER_SIZE(b)      MIN(ceil(BUFFER_RELATIVE_SIZE * (b)), INT_MAX / BUFFER_ELEMENT_SIZE)
+#define GB                      1000000000
 
-/* global variables for the parallelization */
 int num_processes, rank;
 
-u64 buffer_size;
-u64 *buffers;
-u64 *buffers_counts;
+u64 buffer_size;                /* number of elements in a single buffer */
+u64 *buffers;                   /* buffers for a process */
+u64 *buffers_counts;            /* counters for flushing/batch processing */
+
+int compress_factor = 0;        /* to deal memory limitations */
+
+/* timers for performance evaluation */
+double compute_time = 0, communication_time = 0, fill_time = 0, probe_time = 0;
 
 /* variables to measure the buffer efficiency */
 int num_exchanges = 0;
 double cum_buffer_occupancy = 0;
-
-/* compress factor to deal with large n and small memory */
-int compress_factor = 0;
 
 /************************ tools and utility functions *************************/
 
@@ -76,6 +76,13 @@ double wtime()
     struct timeval ts;
 	gettimeofday(&ts, NULL);
 	return (double)ts.tv_sec + ts.tv_usec / 1E6;
+}
+
+void time_comm(void (*f)())
+{
+    double tic = wtime();
+    (*f)();
+    communication_time += wtime() - tic;
 }
 
 // murmur64 hash functions, tailorized for 64-bit ints / Cf. Daniel Lemire
@@ -256,9 +263,11 @@ bool is_good_pair(u64 k1, u64 k2)
 /***************************** MPI functions ***********************************/
 
 /* Allocate memory space for the buffers and the buffer counts. */
-void setup_buffers() {
-    // The buffer_size describes the buffer size for ONE process.
-    // Therefore, a process has a total buffer size of buffer_size * num_processes
+void setup_buffers()
+{
+    /* NOTE: The buffer_size describes the number of elements for ONE process.
+       Therefore, the total number of elements that a process may hold is
+       buffer_size * num_processes. */
     buffer_size = GET_BUFFER_SIZE(dict_size);
     buffers = malloc(sizeof(*buffers) * buffer_size * BUFFER_ELEMENT_SIZE * num_processes);
     buffers_counts = malloc(sizeof(*buffers_counts) * num_processes);
@@ -269,7 +278,8 @@ void setup_buffers() {
 }
 
 /* Add an element to the buffer. Returns 1 if the element's buffer is full. */
-int add_to_buffer(u64 key, u64 val) {
+int add_to_buffer(u64 key, u64 val)
+{
     int h_rank = (murmur64(key) % dict_size_global) / dict_size;
 
     buffers[2 * buffer_size * h_rank + 2 * buffers_counts[h_rank]] = key;
@@ -280,8 +290,9 @@ int add_to_buffer(u64 key, u64 val) {
 }
 
 /* Update the buffer occupancy counters. */
-void update_buffer_occupancy_statistics() {
-    u64 num_elements = 0;  // used only for statistics
+void update_buffer_occupancy_statistics()
+{
+    u64 num_elements = 0;
     for (int i = 0; i < num_processes; i++) {
         num_elements += buffers_counts[i];
     }
@@ -289,32 +300,20 @@ void update_buffer_occupancy_statistics() {
     cum_buffer_occupancy += (double) num_elements / (buffer_size * num_processes);
 }
 
-/* Print average buffer occupancy. */
-void print_average_buffer_occupancy() {
-    if (rank == ROOT_RANK) {
-        MPI_Reduce(MPI_IN_PLACE, &cum_buffer_occupancy, 1, MPI_DOUBLE,
-                   MPI_SUM, ROOT_RANK, MPI_COMM_WORLD);
-        printf("Average buffer occupancy: %.2f%%\n",
-               cum_buffer_occupancy / (num_exchanges * num_processes) * 100);
-    } else {
-        MPI_Reduce(&cum_buffer_occupancy, &cum_buffer_occupancy, 1,
-                   MPI_DOUBLE, MPI_SUM, ROOT_RANK, MPI_COMM_WORLD);
-    }
-}
-
 /* Exchange buffer sizes and buffers between processes. */
-void exchange_buffers() {
+void exchange_buffers()
+{
+    update_buffer_occupancy_statistics();
     MPI_Alltoall(MPI_IN_PLACE, BUFFER_COUNT_SIZE, MPI_UINT64_T, buffers_counts,
                  BUFFER_COUNT_SIZE, MPI_UINT64_T, MPI_COMM_WORLD);
     MPI_Alltoall(MPI_IN_PLACE, buffer_size * BUFFER_ELEMENT_SIZE, MPI_UINT64_T,
                  buffers, buffer_size * BUFFER_ELEMENT_SIZE, MPI_UINT64_T,
                  MPI_COMM_WORLD);
-
-    update_buffer_occupancy_statistics();
 }
 
 /* Insert elements from a buffer into the dict and flush the buffer. */
-void batch_insert() {
+void batch_insert()
+{
     u64 x, z;
 
     for (int i = 0; i < num_processes; i++) {
@@ -331,8 +330,18 @@ void batch_insert() {
     }
 }
 
+/* Check if a solution has been found, resulting in an early exit. */
+int solution_found(int nres)
+{
+    int nres_global;
+    MPI_Allreduce(&nres, &nres_global, EARLY_EXIT_SIZE,
+                  MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    return nres_global > 0;
+}
+
 /* Check elements of the buffer against the local dictionary. */
-u64 batch_probe(int *nres, int maxres, u64 k1[], u64 k2[]) {
+u64 batch_probe(int *nres, int maxres, u64 k1[], u64 k2[])
+{
     u64 y, z;
     u64 x[N_PROBES_MAX];
     u64 ncandidates_partial = 0;
@@ -351,7 +360,6 @@ u64 batch_probe(int *nres, int maxres, u64 k1[], u64 k2[]) {
                         return -1;
                     k1[*nres] = x[i];
                     k2[*nres] = z;
-                    printf("SOLUTION FOUND!\n");
                     *nres += 1;
                 }
         }
@@ -365,15 +373,79 @@ u64 batch_probe(int *nres, int maxres, u64 k1[], u64 k2[]) {
 }
 
 /* Set compression factor based on maximum memory available. */
-void set_compression_factor(int memory_max) {
+void set_compression_factor(double memory_max)
+{
     u64 dict_slots = 1.125 * (1ull << n);
     u64 buffers_slots = GET_BUFFER_SIZE(dict_slots) *
                         BUFFER_ELEMENT_SIZE * num_processes;
     u64 memory_required = (dict_slots + buffers_slots) * sizeof(*A);
-    int minimum_slices = ceil(memory_required / (memory_max * 1e9));
+    int minimum_slices = ceil(memory_required / (memory_max * GB));
 
     while ((1 << compress_factor) < minimum_slices) {
         compress_factor++;
+    }
+}
+
+/* Print execution info for easier debugging. */
+void print_execution_info()
+{
+    if (rank == ROOT_RANK) {
+        printf("Running with n=%d, C0=(%08x, %08x) and C1=(%08x, %08x)\n",
+               (int) n, C[0][0], C[0][1], C[1][0], C[1][1]);
+        printf("Number of processes: %d\n", num_processes);
+        printf("Compression level: %d (%d rounds)\n", compress_factor,
+               1 << compress_factor);
+
+        char hdsize_global[8], hdsize[8];
+
+        human_format(dict_size_global * sizeof(*A), hdsize_global);
+        human_format(dict_size * sizeof(*A), hdsize);
+        printf("Global dictionary size: %sB (%sB per process)\n",
+               hdsize_global, hdsize);
+
+        human_format(GET_BUFFER_SIZE(dict_size) * BUFFER_ELEMENT_SIZE *
+                     num_processes * sizeof(*buffers) * num_processes,
+                     hdsize_global);
+        human_format(GET_BUFFER_SIZE(dict_size) * BUFFER_ELEMENT_SIZE *
+                     num_processes * sizeof(*buffers), hdsize);
+        printf("Total buffer size: %sB (%sB per process)\n",
+               hdsize_global, hdsize);
+    }
+}
+
+/* Print average buffer occupancy. */
+void print_average_buffer_occupancy()
+{
+    if (rank == ROOT_RANK) {
+        MPI_Reduce(MPI_IN_PLACE, &cum_buffer_occupancy, 1, MPI_DOUBLE,
+                   MPI_SUM, ROOT_RANK, MPI_COMM_WORLD);
+        printf("Average buffer occupancy: %.2f%%\n",
+               cum_buffer_occupancy / (num_exchanges * num_processes) * 100);
+    } else {
+        MPI_Reduce(&cum_buffer_occupancy, &cum_buffer_occupancy, 1,
+                   MPI_DOUBLE, MPI_SUM, ROOT_RANK, MPI_COMM_WORLD);
+    }
+}
+
+/* Print processing and communication times. */
+void print_execution_times()
+{
+    if (rank == ROOT_RANK) {
+        printf("Processing time: %.2fs\n", compute_time);
+        printf("Communication time: %.2fs\n", communication_time);
+        printf("Fill time: %.2fs\n", fill_time);
+        printf("Probe time: %.2fs\n", probe_time);
+    }
+}
+
+/* Print important statistics as a structured row of data. */
+void print_statistics_as_structured_data()
+{
+    if (rank == ROOT_RANK) {
+        printf(">>>%d,%d,%d,%.12f,%.12f,%.12f,%.12f,%.12f\n", (int) n,
+               num_processes, compress_factor, compute_time, communication_time,
+               fill_time, probe_time, cum_buffer_occupancy / (num_exchanges
+               * num_processes) * 100);
     }
 }
 
@@ -383,26 +455,26 @@ void set_compression_factor(int memory_max) {
 int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 {
     int nres = 0;
-    u64 ncandidates_global, ncandidates = 0;
-    double start, mid, end;
 
     /* step 0: initialize buffers */
     setup_buffers();
 
-    /* step 1: fill up the dictionaries (using cyclic load balancing) */
+    int num_rounds = 1 << compress_factor;
     u64 N = 1ull << n;
     u64 xs_per_round = N >> compress_factor;
 
-    for (int round = 0; round < (1 << compress_factor); round++) {
+    double start_program = wtime();
+    for (int round = 0; round < num_rounds; round++) {
+        /* step 1: fill up the dictionaries (using cyclic load balancing) */
+        double start_fill = wtime();
         u64 xs_per_process = xs_per_round / num_processes;
-        u64 x_start = xs_per_round * round + rank;
-        u64 x_end = x_start + xs_per_process * num_processes;
+        u64 x_start = num_rounds * rank + round;
+        u64 x_end = x_start + xs_per_process * num_processes * num_rounds;
 
-        start = wtime();
-        for (u64 x = x_start; x < x_end; x += num_processes) {
+        for (u64 x = x_start; x < x_end; x += num_processes * num_rounds) {
             u64 z = f(x);
             if (add_to_buffer(z, x)) {
-                exchange_buffers();
+                time_comm(exchange_buffers);
                 batch_insert();
             }
         }
@@ -414,17 +486,14 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
 
         /* receive elements from other processes */
         do {
-            exchange_buffers();
+            time_comm(exchange_buffers);
             batch_insert();
             MPI_Test(&fill_barrier, &all_fills_complete, MPI_STATUS_IGNORE);
         } while (!all_fills_complete);
-
-        mid = wtime();
-        if (rank == ROOT_RANK) {
-            printf("Fill round %d: %.1fs\n", round, mid - start);
-        }
+        fill_time += wtime() - start_fill;
 
         /* step 2: probe the dictionaries (also with cyclic load balancing) */
+        double start_probe = wtime();
         u64 zs_per_process = N / num_processes;
         u64 z_start = rank;
         u64 z_end = z_start + zs_per_process * num_processes;
@@ -432,8 +501,13 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         for (u64 z = z_start; z < z_end; z += num_processes) {
             u64 y = g(z);
             if (add_to_buffer(y, z)) {
-                exchange_buffers();
-                ncandidates += batch_probe(&nres, maxres, k1, k2);
+                time_comm(exchange_buffers);
+                batch_probe(&nres, maxres, k1, k2);
+                if (solution_found(nres)) {
+                    probe_time += wtime() - start_probe;
+                    compute_time = (wtime() - start_program) - communication_time;
+                    return nres;
+                }
             }
         }
 
@@ -442,26 +516,23 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         MPI_Ibarrier(MPI_COMM_WORLD, &fill_barrier);
 
         do {
-            exchange_buffers();
-            ncandidates += batch_probe(&nres, maxres, k1, k2);
+            time_comm(exchange_buffers);
+            batch_probe(&nres, maxres, k1, k2);
+            if (solution_found(nres)) {
+                probe_time += wtime() - start_probe;
+                compute_time = (wtime() - start_program) - communication_time;
+                return nres;
+            }
             MPI_Test(&fill_barrier, &all_fills_complete, MPI_STATUS_IGNORE);
         } while (!all_fills_complete);
-
-        end = wtime() - mid;
-
-        MPI_Reduce(&ncandidates, &ncandidates_global, 1,
-                    MPI_UINT64_T, MPI_SUM, ROOT_RANK, MPI_COMM_WORLD);
-
-        if (rank == ROOT_RANK) {
-            printf("Probe round %d: %.1fs. %" PRId64 " candidate pairs tested\n",
-                   round, end, ncandidates_global);
-        }
+        probe_time += wtime() - start_probe;
 
         /* reset dictionaries */
         for (u64 i = 0; i < dict_size; i++)
             A[i].k = EMPTY;
-        ncandidates = 0;
     }
+
+    compute_time = (wtime() - start_program) - communication_time;
 
     return nres;
 }
@@ -492,7 +563,7 @@ void process_command_line_options(int argc, char ** argv)
         };
         char ch;
         int set = 0;
-        int memory_max;
+        double memory_max;
         while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1) {
                 switch (ch) {
                 case 'n':
@@ -512,7 +583,7 @@ void process_command_line_options(int argc, char ** argv)
                         C[1][1] = c1 >> 32;
                         break;
                 case 'm':
-                        memory_max = atoi(optarg);
+                        memory_max = atof(optarg);
                         set_compression_factor(memory_max);
                         break;
                 default:
@@ -533,7 +604,6 @@ int main(int argc, char **argv)
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &num_processes);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
     assert(
         num_processes != 0
         && (num_processes & (num_processes - 1)) == 0
@@ -548,40 +618,25 @@ int main(int argc, char **argv)
 	dict_setup(dict_size);
 
     /* print some useful information */
-    if (rank == ROOT_RANK) {
-        printf("Running with n=%d, C0=(%08x, %08x) and C1=(%08x, %08x)\n",
-               (int) n, C[0][0], C[0][1], C[1][0], C[1][1]);
-        printf("Number of processes: %d\n", num_processes);
-        printf("Compression level: %d (%d rounds)\n", compress_factor, 1 << compress_factor);
-
-        char hdsize_global[8], hdsize[8];
-        human_format(dict_size_global * sizeof(*A), hdsize_global);
-        human_format(dict_size * sizeof(*A), hdsize);
-        printf("Global dictionary size: %sB (%sB per process)\n", hdsize_global, hdsize);
-
-        human_format(GET_BUFFER_SIZE(dict_size) * BUFFER_ELEMENT_SIZE *
-                     num_processes * sizeof(*buffers) * num_processes, hdsize_global);
-        human_format(GET_BUFFER_SIZE(dict_size) * BUFFER_ELEMENT_SIZE *
-                     num_processes * sizeof(*buffers), hdsize);
-        printf("Total buffer size: %sB (%sB per process)\n", hdsize_global, hdsize);
-    }
+    print_execution_info();
 
 	/* search */
 	u64 k1[16], k2[16];
 	int nkey = golden_claw_search(16, k1, k2);
 
-    /* barrier to print all solutions together */
+	/* validation; barriers to print all solutions together */
     MPI_Barrier(MPI_COMM_WORLD);
-
-	/* validation */
 	for (int i = 0; i < nkey; i++) {
     	assert(f(k1[i]) == g(k2[i]));
     	assert(is_good_pair(k1[i], k2[i]));
 	    printf("Solution found: (%" PRIx64 ", %" PRIx64 ") [checked OK]\n", k1[i], k2[i]);
 	}
+    MPI_Barrier(MPI_COMM_WORLD);
 
     /* print some post-processing statistics */
     print_average_buffer_occupancy();
+    print_execution_times();
+    print_statistics_as_structured_data();
 
     MPI_Finalize();
 }
