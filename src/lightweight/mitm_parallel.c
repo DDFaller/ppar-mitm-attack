@@ -52,7 +52,7 @@ u32 C[2][2];
 #define BUFFER_RELATIVE_SIZE    0.005    /* 0.5% of (local) dict size */
 #define MIN(x, y)               (((x) < (y)) ? (x) : (y))
 #define GET_BUFFER_SIZE(b)      MIN(ceil(BUFFER_RELATIVE_SIZE * (b)), INT_MAX / BUFFER_ELEMENT_SIZE)
-#define GB                      1000000000
+#define GB                      1073741824
 
 int num_processes, rank;
 
@@ -99,23 +99,23 @@ u64 murmur64(u64 x)
 /* represent n in 4 bytes */
 void human_format(u64 n, char *target)
 {
-    if (n < 1000) {
+    if (n < 1024) {
         sprintf(target, "%" PRId64, n);
         return;
     }
-    if (n < 1000000) {
+    if (n < 1048576) {
         sprintf(target, "%.1fK", n / 1e3);
         return;
     }
-    if (n < 1000000000) {
+    if (n < 1073741824) {
         sprintf(target, "%.1fM", n / 1e6);
         return;
     }
-    if (n < 1000000000000ll) {
+    if (n < 1099511627776ll) {
         sprintf(target, "%.1fG", n / 1e9);
         return;
     }
-    if (n < 1000000000000000ll) {
+    if (n < 1125899906842624ll) {
         sprintf(target, "%.1fT", n / 1e12);
         return;
     }
@@ -375,11 +375,13 @@ u64 batch_probe(int *nres, int maxres, u64 k1[], u64 k2[])
 /* Set compression factor based on maximum memory available. */
 void set_compression_factor(double memory_max)
 {
-    u64 dict_slots = 1.125 * (1ull << n);
+    u64 dict_slots = 1.125 * (1ull << n) / num_processes;
     u64 buffers_slots = GET_BUFFER_SIZE(dict_slots) *
                         BUFFER_ELEMENT_SIZE * num_processes;
-    u64 memory_required = (dict_slots + buffers_slots) * sizeof(*A);
-    int minimum_slices = ceil(memory_required / (memory_max * GB));
+    u64 memory_required = (dict_slots * sizeof(*A) +
+                           buffers_slots * sizeof(*buffers)) * num_processes;
+    // NOTE: We put 1.25x the memory requirement as to not overload the system
+    int minimum_slices = 1.25 * ceil(memory_required / (memory_max * GB));
 
     while ((1 << compress_factor) < minimum_slices) {
         compress_factor++;
