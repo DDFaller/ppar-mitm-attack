@@ -627,7 +627,7 @@ int main(int argc, char **argv)
         && "The number of processes must be a power of two."
     );
 
-	process_command_line_options(argc, argv);
+    process_command_line_options(argc, argv);
 
     /* setup the distributed dictionary strategy */
     dict_size = ceil(1.125 * (1ull << (n - compress_factor)) / num_processes);
@@ -637,17 +637,17 @@ int main(int argc, char **argv)
     /* print some useful information */
     print_execution_info();
 
-	/* search */
-	u64 k1[16], k2[16];
-	int nkey = golden_claw_search(16, k1, k2);
+    /* search */
+    u64 k1[16], k2[16];
+    int nkey = golden_claw_search(16, k1, k2);
 
 	/* validation; barriers to print all solutions together */
     MPI_Barrier(MPI_COMM_WORLD);
-	for (int i = 0; i < nkey; i++) {
-    	assert(f(k1[i]) == g(k2[i]));
-    	assert(is_good_pair(k1[i], k2[i]));
-	    printf("Solution found: (%" PRIx64 ", %" PRIx64 ") [checked OK]\n", k1[i], k2[i]);
-	}
+    for (int i = 0; i < nkey; i++) {
+        assert(f(k1[i]) == g(k2[i]));
+        assert(is_good_pair(k1[i], k2[i]));
+        printf("Solution found: (%" PRIx64 ", %" PRIx64 ") [checked OK]\n", k1[i], k2[i]);
+    }
     MPI_Barrier(MPI_COMM_WORLD);
 
     /* print some post-processing statistics */
