@@ -65,7 +65,9 @@ u32 C[2][2];
 #define GB                      1073741824
 #define RELAXATION_FACTOR       1.25
 
+#ifndef EARLY_EXIT
 #define EARLY_EXIT              0
+#endif
 
 int num_processes, rank;
 
@@ -550,7 +552,6 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
     }
 
     compute_time = (wtime() - start_program) - communication_time;
-
     return nres;
 }
 
