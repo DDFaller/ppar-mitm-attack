@@ -7,24 +7,19 @@
 # Run it on Grid'5000 with `oarsub -S ./collision_finder.sh`.
 #
 # The arguments were retrieved for the username "matheus.daniel".
-# For n < 21, we used the sequential algorithm.
+# For n < 25, we used the sequential algorithm.
 #
 # Authors: Matheus FERNANDES MORENO
 #          Daniel MACHADO CARNEIRO FALLER
 
-#OAR -p fleckenstein
-#OAR -l nodes=6/core=32,walltime=14:00:00
+#OAR -p paradoxe
+#OAR -l nodes=26/core=52,walltime=52:00:00
 #OAR -O mitm_collisions_%jobid%.out
 #OAR -E mitm_collisions_%jobid%.err
-#OAR --notify [RUNNING]mail:Matheus.Fernandes_Moreno@etu.sorbonne-universite.fr
 
-NUM_CORES=128
-MEM_AVAILABLE=3072
+NUM_CORES=256
+MEM_AVAILABLE=9984
 ARGUMENTS=(
-    "--n 21 --C0 fd4954f413eccb41 --C1 889abfcb908fc6b6"
-    "--n 22 --C0 46c1ec5a992f061e --C1 373958e4f1f6d266"
-    "--n 23 --C0 63cd111da28dc1a6 --C1 441be85e84ba6a2a"
-    "--n 24 --C0 01dc33215e01c148 --C1 3b78ab11d45d3d2c"
     "--n 25 --C0 0f540bf824f87e3f --C1 6cc642b7e61ee75e"
     "--n 26 --C0 45969a884ea5be9b --C1 d2832ca643ecaf99"
     "--n 27 --C0 51e42abda56cf674 --C1 cf9e0c42db67fe44"
@@ -61,13 +56,14 @@ export OMPI_MCA_btl='^openib'
 mpiexec --map-by ppr:1:node --hostfile $OAR_NODEFILE hostname
 
 # Compile the program
-mpicc -g mitm_parallel.c -O3 -Wall -Wextra -lm -o mitm_parallel
+mpicc -g mitm_parallel.c -O3 -Wall -Wextra -lm -D EARLY_EXIT=1 -o mitm_parallel
 chmod u+x mitm_parallel
 
 # Search for collisions!
 for arg_list in "${ARGUMENTS[@]}"
 do
     echo "/// new collision search start ///"
-    mpiexec -n $NUM_CORES --hostfile $OAR_NODEFILE ./mitm_parallel \
+    # ppr:10:node since we have 26 nodes and need 256 cores
+    mpiexec -n $NUM_CORES --map-by ppr:10:node --hostfile $OAR_NODEFILE ./mitm_parallel \
         $arg_list --mem $MEM_AVAILABLE
 done

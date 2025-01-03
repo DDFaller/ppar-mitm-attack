@@ -4,6 +4,13 @@
  *
  * Implementation of the MitM distributed algorithm with a "lightweight"
  * option, i.e. to use less memory than required by the sequential version.
+ * When executing it, you must ensure that cores are evenly distributed in
+ * a multinode topology. For instance, if you run the code for 128 cores on
+ * 8 nodes, you should put 16 nodes per core:
+ *
+ *     mpiexec -n 128 --map-by ppr:16:node ./mitm_parallel ...
+ *
+ * That way, the total memory will be equally distributed between cores.
  *
  * The program has an early exit strategy, and halts as soon as a golden
  * collision is found.
@@ -45,14 +52,20 @@ u32 C[2][2];
 /***************************** MPI settings *********************************/
 
 #define N_PROBES_MAX            256
+
 #define ROOT_RANK               0
-#define BUFFER_COUNT_SIZE       1
+#define BUFFER_COUNT_MSG_SIZE   1
 #define BUFFER_ELEMENT_SIZE     2
-#define EARLY_EXIT_SIZE         1
-#define BUFFER_RELATIVE_SIZE    0.005    /* 0.5% of (local) dict size */
+#define EARLY_EXIT_MSG_SIZE     1
+#define BUFFER_RELATIVE_SIZE    0.001    /* 0.1% of (local) dict size */
+
+/* useful macros for compression algorithm */
 #define MIN(x, y)               (((x) < (y)) ? (x) : (y))
 #define GET_BUFFER_SIZE(b)      MIN(ceil(BUFFER_RELATIVE_SIZE * (b)), INT_MAX / BUFFER_ELEMENT_SIZE)
 #define GB                      1073741824
+#define RELAXATION_FACTOR       1.25
+
+#define EARLY_EXIT              0
 
 int num_processes, rank;
 
@@ -304,11 +317,12 @@ void update_buffer_occupancy_statistics()
 void exchange_buffers()
 {
     update_buffer_occupancy_statistics();
-    MPI_Alltoall(MPI_IN_PLACE, BUFFER_COUNT_SIZE, MPI_UINT64_T, buffers_counts,
-                 BUFFER_COUNT_SIZE, MPI_UINT64_T, MPI_COMM_WORLD);
-    MPI_Alltoall(MPI_IN_PLACE, buffer_size * BUFFER_ELEMENT_SIZE, MPI_UINT64_T,
-                 buffers, buffer_size * BUFFER_ELEMENT_SIZE, MPI_UINT64_T,
+    MPI_Alltoall(MPI_IN_PLACE, BUFFER_COUNT_MSG_SIZE, MPI_UINT64_T,
+                 buffers_counts, BUFFER_COUNT_MSG_SIZE, MPI_UINT64_T,
                  MPI_COMM_WORLD);
+    MPI_Alltoall(MPI_IN_PLACE, buffer_size * BUFFER_ELEMENT_SIZE,
+                 MPI_UINT64_T, buffers, buffer_size * BUFFER_ELEMENT_SIZE,
+                 MPI_UINT64_T, MPI_COMM_WORLD);
 }
 
 /* Insert elements from a buffer into the dict and flush the buffer. */
@@ -334,7 +348,7 @@ void batch_insert()
 int solution_found(int nres)
 {
     int nres_global;
-    MPI_Allreduce(&nres, &nres_global, EARLY_EXIT_SIZE,
+    MPI_Allreduce(&nres, &nres_global, EARLY_EXIT_MSG_SIZE,
                   MPI_INT, MPI_SUM, MPI_COMM_WORLD);
     return nres_global > 0;
 }
@@ -380,8 +394,9 @@ void set_compression_factor(double memory_max)
                         BUFFER_ELEMENT_SIZE * num_processes;
     u64 memory_required = (dict_slots * sizeof(*A) +
                            buffers_slots * sizeof(*buffers)) * num_processes;
-    // NOTE: We put 1.25x the memory requirement as to not overload the system
-    int minimum_slices = 1.25 * ceil(memory_required / (memory_max * GB));
+    // NOTE: We put RELAXATION_FACTOR times the memory requirement as to not
+    // overload the system
+    int minimum_slices = RELAXATION_FACTOR * ceil(memory_required / (memory_max * GB));
 
     while ((1 << compress_factor) < minimum_slices) {
         compress_factor++;
@@ -505,7 +520,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
             if (add_to_buffer(y, z)) {
                 time_comm(exchange_buffers);
                 batch_probe(&nres, maxres, k1, k2);
-                if (solution_found(nres)) {
+                if (solution_found(nres) && EARLY_EXIT) {
                     probe_time += wtime() - start_probe;
                     compute_time = (wtime() - start_program) - communication_time;
                     return nres;
@@ -520,7 +535,7 @@ int golden_claw_search(int maxres, u64 k1[], u64 k2[])
         do {
             time_comm(exchange_buffers);
             batch_probe(&nres, maxres, k1, k2);
-            if (solution_found(nres)) {
+            if (solution_found(nres) && EARLY_EXIT) {
                 probe_time += wtime() - start_probe;
                 compute_time = (wtime() - start_program) - communication_time;
                 return nres;
