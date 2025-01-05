@@ -2,18 +2,22 @@
  * Sorbonne Université - PPAR (S1-24)
  * Project - Direct Meet-in-the-Middle Attack
  *
- * Implementation of the MitM distributed algorithm with a "lightweight"
- * option, i.e. to use less memory than required by the sequential version.
- * When executing it, you must ensure that cores are evenly distributed in
+ * Implementation of the MitM distributed algorithm with a compression strategy
+ * that can use less memory than the required by the sequential version.
+ *
+ * If you wish to optimize the memory allocation (i.e. equally distribute it
+ * between processes), you must ensure that cores are evenly distributed in
  * a multinode topology. For instance, if you run the code for 128 cores on
- * 8 nodes, you should put 16 nodes per core:
+ * 8 nodes, you should put 16 cores per node:
  *
  *     mpiexec -n 128 --map-by ppr:16:node ./mitm_parallel ...
  *
- * That way, the total memory will be equally distributed between cores.
+ * This may slow down the code execution, but it also ensures that no memory
+ * problems will ensue.
  *
- * The program has an early exit strategy, and halts as soon as a golden
- * collision is found.
+ * Additionally, the program has an early exit strategy, halting as soon as a
+ * golden collision is found. It must be set during compilation time by
+ * defining the EARLY_EXIT macro.
  *
  * Adapted by: Matheus FERNANDES MORENO
  *             Daniel MACHADO CARNEIRO FALLER
