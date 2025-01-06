@@ -19,6 +19,24 @@ We implemented a **distributed hash table** using **linear probing** for collisi
 - **Global synchronization** for checking the completion of distributed operations.
 
 ---
+## Results
+
+We included to a list of collisions achieved as well as outputs from GRID5000 logs for evaluating the correctness of the project implementation. The files are:
+
+**Collisions File**
+File Name: results/collisions.txt
+Description: Plain text file with the n parameter and the pair encountered by the algorith
+...
+**Execution Logs**
+Log File 1: results/job_output/mitm_collisions_2722000.out
+Log File 2: results/job_output/mitm_collisions_2724456.out
+Log File 3: results/job_output/mitm_performance_2735788.out
+Description: Logs of the algorithm containing info about the resource usage and time taken for multiple executions of the algorithm.
+
+These files serve as evidence of the algorithm’s behavior under different configurations and parameter settings. They also allow for detailed inspection of performance metrics and intermediate steps.
+
+
+---
 
 ## How It Works
 
@@ -37,12 +55,6 @@ We implemented a **distributed hash table** using **linear probing** for collisi
 4. **Completion Check**:
    - A global `is_work_done` check ensures all buffers are empty and no pending operations remain.
 
----
-
-## Requirements
-
-- **C Compiler** (e.g., GCC)
-- **MPI Library** (e.g., OpenMPI or MPICH)
 
 ---
 
@@ -62,10 +74,10 @@ make run
 ```
 This command will execute the algorithm in your computer using 4 CPU_CORES. However, it can be redefined as example bellow to run for another colision test.
 ```bash
-make run N=28 C0=783f0f28839ed66e C1=50ca347a6d809ced
+make run NUM_PROCESSES=6 N=28 C0=783f0f28839ed66e C1=50ca347a6d809ced
 ```
 
-To run it on the GRID5000, we have scripts collision_finder.sh and perfomance_evaluation.sh that can be used as reference.
+To run it on the GRID5000, we have THE scripts `collision_finder.sh` and `perfomance_evaluation.sh` that can be used as reference.
 
 ### Cleaning program residues
 To remove all compiled files and binaries, use:
@@ -76,3 +88,10 @@ To remove all log files:
 ```bash
 make clean_logs
 ```
+
+---
+
+## Requirements
+
+- **C Compiler** (e.g., GCC)
+- **MPI Library** (e.g., OpenMPI or MPICH)

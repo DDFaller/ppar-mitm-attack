@@ -1,0 +1,45 @@
+paradoxe-10.rennes.grid5000.fr
+paradoxe-15.rennes.grid5000.fr
+paradoxe-5.rennes.grid5000.fr
+paradoxe-24.rennes.grid5000.fr
+paradoxe-11.rennes.grid5000.fr
+paradoxe-14.rennes.grid5000.fr
+paradoxe-21.rennes.grid5000.fr
+paradoxe-22.rennes.grid5000.fr
+paradoxe-30.rennes.grid5000.fr
+paradoxe-13.rennes.grid5000.fr
+paradoxe-7.rennes.grid5000.fr
+paradoxe-18.rennes.grid5000.fr
+paradoxe-8.rennes.grid5000.fr
+paradoxe-2.rennes.grid5000.fr
+paradoxe-16.rennes.grid5000.fr
+paradoxe-12.rennes.grid5000.fr
+paradoxe-3.rennes.grid5000.fr
+paradoxe-31.rennes.grid5000.fr
+paradoxe-19.rennes.grid5000.fr
+paradoxe-32.rennes.grid5000.fr
+paradoxe-6.rennes.grid5000.fr
+paradoxe-28.rennes.grid5000.fr
+paradoxe-27.rennes.grid5000.fr
+paradoxe-4.rennes.grid5000.fr
+paradoxe-29.rennes.grid5000.fr
+paradoxe-20.rennes.grid5000.fr
+/// new collision search start ///
+Running with n=42, C0=(5e176c6c, 38d7050f) and C1=(e87c6458, a88919c2)
+Number of processes: 256
+Compression level: 4 (16 rounds)
+Global dictionary size: 3.7TB (14.5GB per process)
+Total buffer size: 1.3TB (4.9GB per process)
+Solution found: (1086fc94d9f, 2ad2d125aee) [checked OK]
+Average buffer occupancy: 98.39%
+Processing time: 102554.12s
+Communication time: 16895.35s
+Fill time: 4552.33s
+Probe time: 114867.43s
+>>>42,256,4,102554.118802309036,16895.352118730545,4552.328171491623,114867.434281110764,98.385436536392
+/// new collision search start ///
+Running with n=43, C0=(cce70795, d8709b35) and C1=(98ffeace, b5d85562)
+Number of processes: 256
+Compression level: 5 (32 rounds)
+Global dictionary size: 3.7TB (14.5GB per process)
+Total buffer size: 1.3TB (4.9GB per process)
