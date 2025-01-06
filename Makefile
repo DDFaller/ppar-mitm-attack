@@ -1,34 +1,57 @@
+# Sorbonne Université - MODEL (S1-24)
+# Distributed Computing Project - MPI Implementation
+#
+# Makefile for compiling, debugging, and executing experiments with MPI.
+#
+# Authors: FERNANDES MORENO Matheus (21400700)
+#          MACHADO CARNEIRO FALLER Daniel (21400117)
+
 # Compiler and flags
 CC = mpicc
-CFLAGS = -Wall
+CFLAGS += -O3 -Wall -Wextra -g -std=c99 -Iinclude
+LDFLAGS += -lm
 
-# Directories
+# Paths
 SRC_DIR = src
-TEST_DIR = tests
 BUILD_DIR = build
+LOGS_DIR = logs
 
 # Source files
-SRC_FILES = $(SRC_DIR)/mitm_mpi.c $(SRC_DIR)/mitm.c 
-TEST_FILES = $(TEST_DIR)/test_shard.c 
+SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 
-# Output executables
-EXECUTABLES = $(BUILD_DIR)/test_shard
+# Object files
+OBJ_FILES = $(SRC_FILES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
-# Default target
-all: setup $(EXECUTABLES)
+# Main binary
+PROGRAM_BINARY = $(BUILD_DIR)/distributed_program
 
-# Create build directory if not exists
-setup:
+# Log file for this execution
+RESULTS_LOG = $(LOGS_DIR)/results-$(shell date +%F-%T).log
+
+# Number of processes for execution
+NUM_PROCESSES = 4
+
+# Execution parameters (configurable at runtime)
+N ?= 25
+C0 ?= 0ce1f5e3b2d4e8c8
+C1 ?= 4f7b73b48e470ee6
+
+# Compile only
+build:
 	@mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(SRC_FILES) -o $(PROGRAM_BINARY) $(LDFLAGS)
 
-# $@ = test_matrix_basic  $^ = $(TEST_DIR)/matrix_basic_operations.c $(SRC_FILES)
-$(BUILD_DIR)/test_shard: $(TEST_DIR)/test_shard.c $(SRC_FILES)
-	$(CC) $(CFLAGS) -o $@ $^ -lm
+# Execute the program
+run: build
+	@mkdir -p $(LOGS_DIR)
+	@echo "Running with $(NUM_PROCESSES) processes and dumping results in $(RESULTS_LOG)..."
+	mpiexec -n $(NUM_PROCESSES) ./$(PROGRAM_BINARY) --n $(N) --C0 $(C0) --C1 $(C1)> $(RESULTS_LOG)
 
-# Run all tests
-run-tests: all
-	@echo "Running test shard ..."
-	@ mpiexec $(BUILD_DIR)/test_shard
+# Clean build directory
+clean_build:
+	rm -rf $(BUILD_DIR)
 
-clean:
-	rm -rf $(BUILD_DIR)/*.o $(BUILD_DIR)/*
+# Clean logs directory
+clean_logs:
+	rm -rf $(LOGS_DIR)
+
