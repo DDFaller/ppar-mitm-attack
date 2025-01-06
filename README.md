@@ -14,19 +14,20 @@ We implemented a **distributed hash table** using **linear probing** for collisi
 
 #### Hash Table Features
 - **Linear probing** for collision handling.
-- **Buffer management** for storing key-value pairs that need to be redirected to other nodes.
+- **Buffer management** for storing key-value pairs that must be redirected to other nodes.
 - **Dynamic redirection** for handling full nodes and ensuring fault tolerance.
 - **Global synchronization** for checking the completion of distributed operations.
 
 ---
 ## Results
 
-We included to a list of collisions achieved as well as outputs from GRID5000 logs for evaluating the correctness of the project implementation. The files are:
+We included a list of collisions achieved and outputs from GRID5000 logs to evaluate the correctness of the project implementation. The files are:
 
 **Collisions File**
+
 File Name: results/collisions.txt
-Description: Plain text file with the n parameter and the pair encountered by the algorith
-...
+Description: Plain text file with the n parameter and the pair encountered by the algorithm
+
 **Execution Logs**
 Log File 1: results/job_output/mitm_collisions_2722000.out
 Log File 2: results/job_output/mitm_collisions_2724456.out
