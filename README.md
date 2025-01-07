@@ -54,7 +54,7 @@ These files serve as evidence of the algorithm’s behavior under different conf
    - If the target node is full, keys are buffered and redirected to other nodes dynamically.
 
 3. **Synchronization**:
-   - Nodes periodically exchange buffer information using MPI to redistribute entries.
+   - When a node buffer is full it triggers an exchange buffer information using MPI to redistribute entries.
    - Global synchronization ensures all nodes complete their tasks before termination.
 
 4. **Completion Check**:
@@ -93,6 +93,8 @@ To remove all log files:
 ```bash
 make clean_logs
 ```
+
+More details in the report.pdf present in the repository.
 
 ---
 
