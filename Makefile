@@ -1,10 +1,10 @@
-# Sorbonne Université - MODEL (S1-24)
-# Distributed Computing Project - MPI Implementation
+# Sorbonne Université - PPAR (S1-24)
+# Project - Direct Meet-in-the-Middle Attack
 #
-# Makefile for compiling, debugging, and executing experiments with MPI.
+# Makefile for compiling, debugging, and executing experiments.
 #
-# Authors: FERNANDES MORENO Matheus (21400700)
-#          MACHADO CARNEIRO FALLER Daniel (21400117)
+# Authors: Matheus FERNANDES MORENO
+#          Daniel MACHADO CARNEIRO FALLER
 
 # Compiler and flags
 CC = mpicc
@@ -23,7 +23,7 @@ SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
 OBJ_FILES = $(SRC_FILES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
 # Main binary
-PROGRAM_BINARY = $(BUILD_DIR)/distributed_program
+PROGRAM_BINARY = $(BUILD_DIR)/mitm_parallel
 
 # Log file for this execution
 RESULTS_LOG = $(LOGS_DIR)/results-$(shell date +%F-%T).log
