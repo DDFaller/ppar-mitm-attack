@@ -26,12 +26,16 @@ We included a list of collisions achieved and outputs from GRID5000 logs to eval
 **Collisions File**
 
 File Name: results/collisions.txt
+
 Description: Plain text file with the n parameter and the pair encountered by the algorithm
 
 **Execution Logs**
 Log File 1: results/job_output/mitm_collisions_2722000.out
+
 Log File 2: results/job_output/mitm_collisions_2724456.out
+
 Log File 3: results/job_output/mitm_performance_2735788.out
+
 Description: Logs of the algorithm containing info about the resource usage and time taken for multiple executions of the algorithm.
 
 These files serve as evidence of the algorithm’s behavior under different configurations and parameter settings. They also allow for detailed inspection of performance metrics and intermediate steps.
