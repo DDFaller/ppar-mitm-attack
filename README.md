@@ -11,14 +11,14 @@
 We implemented a **distributed hash table** using **linear probing** for collision resolution, designed to operate across multiple nodes in a distributed system using **MPI (Message Passing Interface)**. Each process manages a shard of the hash table, and communication between processes ensures efficient insertion, retrieval, and distribution of key-value pairs.
 
 #### Hash Table Features
+
 - **Linear probing** for collision handling.
 - **Buffer management** for storing key-value pairs that must be redirected to other cores.
 - **Global synchronization** for checking the completion of distributed operations.
 
-
 ## Results
 
-We included a list of collisions achieved and outputs from GRID5000 logs to evaluate the correctness of the project implementation. The files are:
+We included a list of collisions achieved and outputs from Grid'5000 logs to evaluate the correctness of the project implementation. The files are:
 
 **Collisions File**
 
